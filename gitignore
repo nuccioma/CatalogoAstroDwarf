@@ -1,0 +1,26 @@
+# File e cartelle generati dal programma stesso: non vanno versionati,
+# sono dati personali di chi lo usa (database, foto in miniatura, log,
+# impostazioni), non codice sorgente.
+dwarf_catalog/catalogo_dwarf.db
+dwarf_catalog/settings.ini
+dwarf_catalog/thumbnails/
+dwarf_catalog/logs/
+
+# File Python compilati
+__pycache__/
+*.pyc
+*.pyo
+
+# Cartelle create da build_exe.ps1 durante la creazione dell'eseguibile
+# Windows: sono file generati (centinaia di MB), non codice sorgente.
+.venv_build/
+build/
+dist/
+*.spec
+*_portable.zip
+
+# File/cartelle tipiche di Windows ed editor
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

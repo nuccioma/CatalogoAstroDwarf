@@ -1,0 +1,45 @@
+PyQt6>=6.6
+Pillow>=10.0
+
+# Richieste (non più opzionali) per: lettura header/temperatura FITS, anteprima
+# dei raw nella finestra "Apri sessione" (con stretch ZScale/Asinh), calcolo di
+# altezza/azimut/condizioni lunari al momento della ripresa, e controllo di
+# qualità dei raw (sfondo, stelle rilevate, FWHM). Installano numpy come
+# dipendenza.
+astropy>=6.0
+
+# Richiesta per il pulsante "Identifica oggetto (SIMBAD)" (tipo oggetto,
+# costellazione, magnitudine, coordinate a partire dal nome del target) e
+# per il pulsante "Astrometria (etichetta oggetti)" (ricerca su SIMBAD sia
+# degli oggetti notevoli - galassie/nebulose/ammassi Messier/NGC/IC - sia,
+# se richiesto, delle stelle più luminose del campo che hanno un nome
+# leggibile). Queste ricerche richiedono una connessione Internet; senza,
+# falliscono con un messaggio d'errore, il resto del programma funziona
+# comunque normalmente.
+astroquery>=0.4.7
+
+# Richiesta per il controllo di qualità dei raw nella finestra "Apri
+# sessione" (rilevamento stelle e FWHM). Senza photutils l'analisi calcola
+# comunque sfondo/rumore ma stelle rilevate e FWHM restano "?".
+photutils>=1.13
+
+# --- Non sono pacchetti Python: dipendenze ESTERNE per il pulsante ---
+# --- "Astrometria (etichetta oggetti)", una a scelta ogni volta     ---
+#
+# Metodologia "SIMBAD": il plate solving (la corrispondenza pixel<->
+# coordinate celesti su tutta l'immagine, non solo sul target) è delegato a
+# Siril in modalità headless (siril-cli.exe), usando il suo catalogo Gaia
+# locale: funziona offline, ma richiede Siril installato con quel catalogo
+# scaricato (Siril -> Impostazioni -> Astrometria), e il percorso di
+# siril-cli.exe impostato da File -> "Imposta percorso Siril (siril-cli.exe)..."
+# nell'app (di norma "C:\Program Files\Siril\bin\siril-cli.exe").
+#
+# Metodologia "Astrometry.net": risolve ED etichetta con Astrometry.net
+# installato in locale dentro WSL (Sottosistema Windows per Linux, con una
+# distribuzione Ubuntu), richiamato da Windows tramite wsl.exe (di norma già
+# nel PATH di sistema, nessun percorso da configurare nell'app). Richiede,
+# dentro WSL: "sudo apt install astrometry.net astrometry-data-2mass-08-19
+# astrometry-data-tycho2" (indici stellari sufficienti per il campo TELE/WIDE
+# del Dwarf II/III). Funziona offline; a differenza di Siril non richiede il
+# FITS (risolve "alla cieca" anche dal jpg) ed è Astrometry.net stesso, non
+# SIMBAD, a fornire i nomi degli oggetti etichettati.
