@@ -8,6 +8,23 @@ target, filtro, ecc., con anteprima degli stack e alcune funzioni extra.
 Sviluppato per uso personale e condiviso liberamente con la comunità
 italiana dei possessori di telescopi Dwarf.
 
+## Download rapido (consigliato per chi non conosce GitHub)
+
+Se non hai familiarità con GitHub e vuoi solo usare il programma, il modo
+più semplice è:
+
+1. Vai alla pagina delle **[Release](https://github.com/nuccioma/CatalogoAstroDwarf/releases/latest)**.
+2. Nella sezione "Assets" in fondo, scarica il file
+   `CatalogoAstroDwarf_portable.zip`.
+3. Estrai lo zip in una cartella qualsiasi del tuo PC ed esegui
+   `CatalogoAstroDwarf.exe`: non serve installare Python né altro.
+
+Le istruzioni dettagliate (con anche le funzioni opzionali) sono nel file
+`Leggimi.txt` incluso nello zip.
+
+Le sezioni seguenti riguardano invece chi preferisce usare il codice
+sorgente Python direttamente (es. per modificarlo).
+
 ## Funzionalità principali
 
 - Scansione automatica delle cartelle create dai telescopi Dwarf (sessioni
@@ -37,8 +54,8 @@ italiana dei possessori di telescopi Dwarf.
 ## Come avviarlo
 
 ```powershell
-git clone https://github.com/<tuo-utente>/<nome-repository>.git
-cd <nome-repository>
+git clone https://github.com/nuccioma/CatalogoAstroDwarf.git
+cd CatalogoAstroDwarf
 pip install -r dwarf_catalog\requirements.txt
 python dwarf_catalog\main.py
 ```
