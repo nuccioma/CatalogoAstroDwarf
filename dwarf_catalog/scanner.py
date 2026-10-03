@@ -134,8 +134,14 @@ DARK_FILENAME_TEMP_RE = re.compile(
 )
 
 # --- Sessioni dark manuali (DWARF_DARK) ------------------------------------
+# Il prefisso camera ("tele_"/"wide_") è presente nei nomi delle cartelle dei
+# telescopi più recenti (Dwarf 3/Mini/Draco), ma non in quelle del Dwarf II
+# (es. "exp_15_gain_100_bin_1"): su quel telescopio la camera è sempre e solo
+# "TELE", quindi il gruppo è reso opzionale e, se assente, lo si imposta di
+# default in parse_dark_session_folder_name() (richiesto da Nuccio dopo aver
+# notato che tutte quelle cartelle del Dwarf II finivano ignorate).
 DARK_SESSION_FOLDER_RE = re.compile(
-    r"^(?P<camera>tele|wide)_exp_(?P<exp>[0-9.]+)_gain_(?P<gain>\d+)_bin_(?P<bin>\d+)"
+    r"^(?:(?P<camera>tele|wide)_)?exp_(?P<exp>[0-9.]+)_gain_(?P<gain>\d+)_bin_(?P<bin>\d+)"
     r"(?:_(?P<y>\d{4})-(?P<mo>\d{2})-(?P<d>\d{2})-(?P<h>\d{2})-(?P<mi>\d{2})-(?P<s>\d{2})-(?P<ms>\d+))?$",
     re.IGNORECASE,
 )
@@ -281,7 +287,9 @@ def parse_dark_session_folder_name(name):
         return None
     g = m.groupdict()
     result = {
-        "camera": g["camera"].upper(),
+        # Dwarf II: nessun prefisso camera nel nome cartella -> sempre TELE
+        # (il Dwarf II non ha una camera WIDE separata per i dark manuali).
+        "camera": g["camera"].upper() if g["camera"] else "TELE",
         "exposure": float(g["exp"]),
         "gain": int(g["gain"]),
         "bin": int(g["bin"]),

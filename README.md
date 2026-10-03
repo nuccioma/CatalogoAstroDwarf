@@ -1,12 +1,14 @@
 # Catalogo Sessioni Astronomiche DWARF
 
+**Versione attuale: 1.1** - vedi [Changelog](#changelog) più sotto.
+
 Catalogo per organizzare e consultare le sessioni astrofotografiche dei
 telescopi **Dwarf II, Dwarf 3, Dwarf Mini e Dwarf Draco**: scansiona le
 cartelle delle tue riprese e crea un archivio ricercabile per data,
 target, filtro, ecc., con anteprima degli stack e alcune funzioni extra.
 
 Sviluppato per uso personale e condiviso liberamente con la comunità
-italiana dei possessori di telescopi Dwarf.
+dei possessori di telescopi Dwarf.
 
 ## Download rapido (consigliato per chi non conosce GitHub)
 
@@ -126,6 +128,39 @@ campo) richiedono una connessione Internet.
 Il programma parte in italiano. Per passare all'inglese: menu File ->
 Lingua -> English (va richiuso e riaperto il programma perché il cambio
 abbia effetto).
+
+## Changelog
+
+### v1.1
+
+- Finestra principale e finestra "Apri sessione" ora si adattano a
+  qualunque risoluzione/dimensione dello schermo: il pannello destro
+  (foto, informazioni, pulsanti) è diviso in sezioni ridimensionabili a
+  piacere, e i pulsanti vanno a capo da soli invece di uscire dalla
+  finestra sugli schermi più piccoli.
+- Corretto un bug per cui, ridimensionando i pannelli, la foto poteva
+  restare "congelata" alla dimensione precedente (apparendo tagliata):
+  ora si riscala sempre correttamente per occupare lo spazio disponibile.
+- Se la posizione/dimensione della finestra era stata salvata su un
+  monitor diverso (es. più grande), ora viene riportata automaticamente
+  dentro i limiti dello schermo attuale invece di apparire fuori vista.
+- Corretto il riconoscimento dei frame DARK del **Dwarf II**: le sue
+  cartelle di calibrazione, con un nome diverso da quello dei telescopi
+  successivi, non venivano più segnalate come "non riconosciute" durante
+  la scansione.
+- Aggiunto un pulsante **"Visualizza file…"** nella finestra dei frame di
+  calibrazione (Bias/Dark/Flat), per vedere anteprima immagine/FITS e
+  header anche lì - senza gli strumenti di analisi qualità raw ("Analizza
+  qualità raw", colonne Stelle/FWHM/Rumore di fondo), che non hanno senso
+  sui frame di calibrazione.
+
+### v1.0
+
+- Prima versione pubblica: scansione automatica delle cartelle Dwarf,
+  archivio ricercabile, anteprima stack, identificazione oggetto e
+  condizioni osservative via SIMBAD, astrometria con etichettatura del
+  campo (Siril+SIMBAD oppure Astrometry.net via WSL), analisi di qualità
+  dei raw, operazioni sui file, interfaccia italiano/inglese.
 
 ## Licenza
 

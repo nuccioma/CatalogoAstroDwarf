@@ -164,7 +164,7 @@ _EN = {
 
     # --- Finestra "Informazioni su..." ---
     "Informazioni su Catalogo Sessioni Astronomiche DWARF": "About DWARF Astronomical Session Catalog",
-    "Catalogo Sessioni Astronomiche DWARF v. 1.0": "DWARF Astronomical Session Catalog v. 1.0",
+    "Catalogo Sessioni Astronomiche DWARF v. 1.1": "DWARF Astronomical Session Catalog v. 1.1",
     "Creata da Nuccio Mandarà con l'aiuto fondamentale di Claude AI.":
         "Created by Nuccio Mandarà with the essential help of Claude AI.",
 
@@ -263,8 +263,14 @@ _EN = {
     "IR / stack / n.raw": "IR / stack / raw count",
     "Percorso": "Path",
     "Apri cartella sessione": "Open session folder",
+    "Visualizza file…": "View files…",
+    "Apre i file del frame selezionato in una finestra con anteprima immagine/FITS "
+    "e header, come per le sessioni normali.":
+        "Opens the files of the selected frame in a window with image/FITS preview "
+        "and header, same as for regular sessions.",
     "Cartella non trovata": "Folder not found",
     "La cartella non è più presente sul disco:\n{folder}": "The folder is no longer present on disk:\n{folder}",
+    "Frame di calibrazione: {label}": "Calibration frame: {label}",
     "{n} elementi": "{n} items",
     "Rimuovi dal catalogo": "Remove from catalog",
     "Rimuovere {n} elemento/i dal catalogo?\n"

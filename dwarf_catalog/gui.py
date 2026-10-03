@@ -9,14 +9,15 @@ import shutil
 import logging
 import datetime
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QSettings, QUrl, QDate, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QSettings, QUrl, QDate, QTimer, QRect, QPoint
 from PyQt6.QtGui import QIcon, QPixmap, QDesktopServices, QAction, QActionGroup
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QCheckBox, QRadioButton, QProgressBar,
     QPlainTextEdit, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QComboBox, QAbstractItemView, QMessageBox, QStatusBar, QDateEdit, QFrame,
-    QDialog, QInputDialog, QDialogButtonBox, QButtonGroup, QScrollArea
+    QDialog, QInputDialog, QDialogButtonBox, QButtonGroup, QScrollArea, QSizePolicy,
+    QLayout
 )
 
 from db import CatalogDB
@@ -147,6 +148,168 @@ def build_file_action_row(include_remove_catalog=True, remove_label="Rimuovi dal
         buttons[key] = btn
     layout.addStretch(1)
     return layout, buttons
+
+
+class FlowLayout(QLayout):
+    """Layout che dispone i widget (qui: i pulsanti del pannello dettaglio) uno
+    dopo l'altro e li manda a capo automaticamente quando lo spazio orizzontale
+    disponibile non basta più, invece di farli uscire dalla finestra o farli
+    sovrapporre ad altri elementi. Così l'interfaccia resta utilizzabile a
+    qualunque risoluzione/larghezza di schermo, senza bottoni tagliati o fuori
+    vista (adattamento richiesto da un utente con schermo Full HD 1920x1080).
+    Adattato dal classico esempio "Flow Layout" della documentazione Qt."""
+
+    def __init__(self, parent=None, margin=0, h_spacing=6, v_spacing=6):
+        super().__init__(parent)
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+        self._items = []
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def __del__(self):
+        while self.count():
+            self.takeAt(0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def horizontalSpacing(self):
+        return self._h_spacing
+
+    def verticalSpacing(self):
+        return self._v_spacing
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        left, top, right, bottom = self.getContentsMargins()
+        effective_rect = rect.adjusted(left, top, -right, -bottom)
+        x = effective_rect.x()
+        y = effective_rect.y()
+        line_height = 0
+
+        for item in self._items:
+            widget = item.widget()
+            space_x = self._h_spacing
+            space_y = self._v_spacing
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > effective_rect.right() and line_height > 0:
+                x = effective_rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y() + bottom
+
+
+class ProportionalSplitter(QSplitter):
+    """QSplitter che, quando è la FINESTRA (o il pannello che lo contiene) a
+    cambiare dimensione - non quando l'utente trascina a mano una barra
+    divisoria - mantiene le stesse proporzioni tra i pannelli invece di dare
+    tutto lo spazio in più (o in meno) a un solo pannello. Qt di norma, in
+    questo caso, tende a far crescere soprattutto il pannello con il
+    contenuto più "elastico" (es. l'area informazioni), lasciando per esempio
+    la foto piccola anche se la finestra diventa molto più grande: così
+    invece ogni sezione si adatta nella stessa proporzione, e si può comunque
+    sempre regolarla a mano trascinando la barra (segnalato da Nuccio dopo
+    aver notato che allargando la finestra lo spazio extra andava quasi tutto
+    al pannello informazioni)."""
+
+    def resizeEvent(self, event):
+        old_size = event.oldSize()
+        new_size = event.size()
+        if old_size.width() >= 0 and old_size.height() >= 0:
+            if self.orientation() == Qt.Orientation.Vertical:
+                old_total, new_total = old_size.height(), new_size.height()
+            else:
+                old_total, new_total = old_size.width(), new_size.width()
+
+            sizes = self.sizes()
+            current_total = sum(sizes)
+            if old_total > 0 and new_total > 0 and current_total > 0 and new_total != old_total:
+                new_sizes = [max(1, round(s * new_total / current_total)) for s in sizes]
+                # Corregge l'arrotondamento sull'ultimo pannello, per non
+                # sforare/mancare il totale di qualche pixel.
+                new_sizes[-1] = max(1, new_sizes[-1] + (new_total - sum(new_sizes)))
+                self.setSizes(new_sizes)
+
+        super().resizeEvent(event)
+
+
+class ScaledPixmapLabel(QLabel):
+    """QLabel per le anteprime foto che si ri-scala da sola ogni volta che la
+    sua area disponibile cambia (trascinando la barra di uno splitter, o
+    ridimensionando la finestra), non solo quando viene caricata una nuova
+    immagine. Senza questo, l'immagine restava "congelata" alla dimensione di
+    quando era stata mostrata l'ultima volta: se poi il riquadro della foto
+    si restringeva (es. allargando il riquadro informazioni sotto), l'ultima
+    immagine mostrata appariva tagliata invece di rimpicciolirsi per
+    adattarsi (segnalato da Nuccio con screenshot). Si usa come una QLabel
+    normale: setPixmap(pixmap) con l'immagine alla sua risoluzione originale
+    (non già scalata a mano) fa il resto da sola."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._source_pixmap = None
+
+    def setPixmap(self, pixmap):
+        self._source_pixmap = pixmap if (pixmap is not None and not pixmap.isNull()) else None
+        self._apply_scaled()
+
+    def _apply_scaled(self):
+        if self._source_pixmap is None:
+            super().setPixmap(QPixmap())
+            return
+        w, h = max(1, self.width()), max(1, self.height())
+        scaled = self._source_pixmap.scaled(
+            w, h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        super().setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._source_pixmap is not None:
+            self._apply_scaled()
 
 
 class NumericItem(QTableWidgetItem):
@@ -483,9 +646,17 @@ class SessionFilesDialog(QDialog):
     Permette anche di: selezionare più file per eliminarli/rinominarli/
     spostarli/copiarli fisicamente (con conferma prima di ogni operazione),
     e di analizzarne la qualità (stelle rilevate, FWHM, rumore di fondo) per
-    selezionare rapidamente gli scarti da escludere da un eventuale stacking."""
+    selezionare rapidamente gli scarti da escludere da un eventuale stacking.
 
-    def __init__(self, session_path, session_label, db, thumb_dir, parent=None, on_change=None):
+    Con show_quality_tools=False (usato per i frame di calibrazione, dove
+    l'analisi qualità stelle/FWHM non ha senso) i controlli e le colonne di
+    qualità restano semplicemente nascosti: resta tutto il resto (anteprima,
+    header FITS, operazioni sui file). settings_prefix tiene separate le
+    impostazioni salvate (geometria, larghezza colonne...) da quelle della
+    finestra 'Apri sessione' normale, dato che il contenuto è diverso."""
+
+    def __init__(self, session_path, session_label, db, thumb_dir, parent=None, on_change=None,
+                 show_quality_tools=True, settings_prefix="sessionfiles", window_title=None):
         super().__init__(parent)
         self.session_path = session_path
         self.db = db
@@ -493,13 +664,15 @@ class SessionFilesDialog(QDialog):
         self.on_change = on_change
         self.quality_worker = None
         self._current_preview_path = None
+        self._show_quality_tools = show_quality_tools
+        self._settings_prefix = settings_prefix
         self.settings = make_settings()
-        self.setWindowTitle(tr("Sessione: {label}").format(label=session_label))
+        self.setWindowTitle(window_title or tr("Sessione: {label}").format(label=session_label))
         self.resize(1500, 900)
 
         layout = QVBoxLayout(self)
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = ProportionalSplitter(Qt.Orientation.Horizontal)
 
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
@@ -514,6 +687,12 @@ class SessionFilesDialog(QDialog):
         self.files_table.setSortingEnabled(True)
         self.files_table.itemSelectionChanged.connect(self._on_file_selected)
         self.files_table.itemChanged.connect(self._on_item_changed)
+        if not self._show_quality_tools:
+            # Niente analisi qualità sui frame di calibrazione (bias/dark/
+            # flat): "stelle rilevate"/FWHM non hanno senso su un frame senza
+            # stelle, quindi le colonne restano nascoste (richiesto da Nuccio).
+            for col in (SF_STARS, SF_FWHM, SF_NOISE):
+                self.files_table.setColumnHidden(col, True)
         left_layout.addWidget(self.files_table, 1)
 
         action_layout, self.file_action_buttons = build_file_action_row(include_remove_catalog=False)
@@ -523,63 +702,72 @@ class SessionFilesDialog(QDialog):
         self.file_action_buttons["copy"].clicked.connect(self.action_copy)
         left_layout.addLayout(action_layout)
 
-        # Avvertenza sul significato dei valori di qualità: sono utili per
-        # confrontare i file TRA LORO all'interno della stessa sessione (per
-        # scartare i peggiori), ma il valore assoluto e la classifica dei
-        # singoli file possono differire leggermente da quelli di altri
-        # programmi (DeepSkyStacker, Siril, ecc.), che usano algoritmi di
-        # misura diversi (richiesto da Nuccio dopo i confronti con Fusion
-        # Lab/DSS/Siril).
-        quality_caveat_text = (
-            "I valori di stelle/FWHM sono calcolati con un algoritmo proprio dell'app: "
-            "utili per confrontare i file tra loro nella stessa sessione e scartare i peggiori, "
-            "ma il valore assoluto e l'ordine dei singoli file possono differire leggermente da "
-            "quelli di altri programmi (DeepSkyStacker, Siril, ecc.), che misurano con algoritmi diversi."
-        )
+        if self._show_quality_tools:
+            # Avvertenza sul significato dei valori di qualità: sono utili per
+            # confrontare i file TRA LORO all'interno della stessa sessione
+            # (per scartare i peggiori), ma il valore assoluto e la classifica
+            # dei singoli file possono differire leggermente da quelli di
+            # altri programmi (DeepSkyStacker, Siril, ecc.), che usano
+            # algoritmi di misura diversi (richiesto da Nuccio dopo i
+            # confronti con Fusion Lab/DSS/Siril).
+            quality_caveat_text = (
+                "I valori di stelle/FWHM sono calcolati con un algoritmo proprio dell'app: "
+                "utili per confrontare i file tra loro nella stessa sessione e scartare i peggiori, "
+                "ma il valore assoluto e l'ordine dei singoli file possono differire leggermente da "
+                "quelli di altri programmi (DeepSkyStacker, Siril, ecc.), che misurano con algoritmi diversi."
+            )
 
-        quality_layout = QHBoxLayout()
-        self.analyze_btn = QPushButton(tr("Analizza qualità raw"))
-        self.analyze_btn.setToolTip(tr(quality_caveat_text))
-        self.analyze_btn.clicked.connect(self.analyze_quality)
-        quality_layout.addWidget(self.analyze_btn)
-        self.quality_progress = QProgressBar()
-        self.quality_progress.setMaximumWidth(140)
-        quality_layout.addWidget(self.quality_progress)
-        quality_layout.addWidget(QLabel(tr("Scarta se stelle <")))
-        self.min_stars_edit = QLineEdit("3")
-        self.min_stars_edit.setFixedWidth(36)
-        quality_layout.addWidget(self.min_stars_edit)
-        quality_layout.addWidget(QLabel(tr("o FWHM >")))
-        self.max_fwhm_edit = QLineEdit("6.0")
-        self.max_fwhm_edit.setFixedWidth(44)
-        quality_layout.addWidget(self.max_fwhm_edit)
-        quality_layout.addWidget(QLabel(tr("o rumore >")))
-        self.max_noise_edit = QLineEdit("50")
-        self.max_noise_edit.setFixedWidth(44)
-        quality_layout.addWidget(self.max_noise_edit)
-        select_bad_btn = QPushButton(tr("Seleziona scarti"))
-        select_bad_btn.clicked.connect(self.select_low_quality)
-        quality_layout.addWidget(select_bad_btn)
-        deselect_btn = QPushButton(tr("Deseleziona tutto"))
-        deselect_btn.clicked.connect(self.deselect_all_files)
-        quality_layout.addWidget(deselect_btn)
-        quality_layout.addStretch(1)
-        left_layout.addLayout(quality_layout)
+            quality_layout = QHBoxLayout()
+            self.analyze_btn = QPushButton(tr("Analizza qualità raw"))
+            self.analyze_btn.setToolTip(tr(quality_caveat_text))
+            self.analyze_btn.clicked.connect(self.analyze_quality)
+            quality_layout.addWidget(self.analyze_btn)
+            self.quality_progress = QProgressBar()
+            self.quality_progress.setMaximumWidth(140)
+            quality_layout.addWidget(self.quality_progress)
+            quality_layout.addWidget(QLabel(tr("Scarta se stelle <")))
+            self.min_stars_edit = QLineEdit("3")
+            self.min_stars_edit.setFixedWidth(36)
+            quality_layout.addWidget(self.min_stars_edit)
+            quality_layout.addWidget(QLabel(tr("o FWHM >")))
+            self.max_fwhm_edit = QLineEdit("6.0")
+            self.max_fwhm_edit.setFixedWidth(44)
+            quality_layout.addWidget(self.max_fwhm_edit)
+            quality_layout.addWidget(QLabel(tr("o rumore >")))
+            self.max_noise_edit = QLineEdit("50")
+            self.max_noise_edit.setFixedWidth(44)
+            quality_layout.addWidget(self.max_noise_edit)
+            select_bad_btn = QPushButton(tr("Seleziona scarti"))
+            select_bad_btn.clicked.connect(self.select_low_quality)
+            quality_layout.addWidget(select_bad_btn)
+            deselect_btn = QPushButton(tr("Deseleziona tutto"))
+            deselect_btn.clicked.connect(self.deselect_all_files)
+            quality_layout.addWidget(deselect_btn)
+            quality_layout.addStretch(1)
+            left_layout.addLayout(quality_layout)
 
-        quality_caveat_label = QLabel("ℹ️ " + tr(quality_caveat_text))
-        quality_caveat_label.setWordWrap(True)
-        quality_caveat_label.setStyleSheet("color: gray; font-style: italic; font-size: 9pt;")
-        left_layout.addWidget(quality_caveat_label)
+            quality_caveat_label = QLabel("ℹ️ " + tr(quality_caveat_text))
+            quality_caveat_label.setWordWrap(True)
+            quality_caveat_label.setStyleSheet("color: gray; font-style: italic; font-size: 9pt;")
+            left_layout.addWidget(quality_caveat_label)
 
         self.splitter.addWidget(left_widget)
 
-        preview_widget = QWidget()
-        preview_layout = QVBoxLayout(preview_widget)
-        self.preview_label = QLabel(tr("Seleziona un file per l'anteprima"))
+        # Foto e header FITS in uno splitter verticale dedicato (stesso
+        # principio del pannello dettaglio della finestra principale): così
+        # si può ridimensionare liberamente lo spazio tra le due parti invece
+        # di avere un'altezza fissa per la foto (qui c'è un solo pulsante,
+        # "Ingrandisci…", che resta semplicemente ancorato sotto la foto).
+        self.preview_splitter = ProportionalSplitter(Qt.Orientation.Vertical)
+
+        photo_widget = QWidget()
+        photo_layout = QVBoxLayout(photo_widget)
+        photo_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_label = ScaledPixmapLabel(tr("Seleziona un file per l'anteprima"))
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumHeight(320)
+        self.preview_label.setMinimumHeight(120)
         self.preview_label.setFrameShape(QFrame.Shape.StyledPanel)
-        preview_layout.addWidget(self.preview_label, 2)
+        photo_layout.addWidget(self.preview_label, 1)
 
         zoom_row = QHBoxLayout()
         self.zoom_btn = QPushButton(tr("Ingrandisci…"))
@@ -589,13 +777,27 @@ class SessionFilesDialog(QDialog):
         self.zoom_btn.clicked.connect(self.open_zoom_dialog)
         zoom_row.addWidget(self.zoom_btn)
         zoom_row.addStretch(1)
-        preview_layout.addLayout(zoom_row)
+        photo_layout.addLayout(zoom_row)
+        self.preview_splitter.addWidget(photo_widget)
 
-        preview_layout.addWidget(QLabel(f"<b>{tr('Header FITS:')}</b>"))
+        header_widget = QWidget()
+        header_layout = QVBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.addWidget(QLabel(f"<b>{tr('Header FITS:')}</b>"))
         self.header_view = QPlainTextEdit()
         self.header_view.setReadOnly(True)
         self.header_view.setPlaceholderText(tr("(nessun header — seleziona un file FITS)"))
-        preview_layout.addWidget(self.header_view, 1)
+        self.header_view.setMinimumHeight(80)
+        header_layout.addWidget(self.header_view, 1)
+        self.preview_splitter.addWidget(header_widget)
+
+        self.preview_splitter.setStretchFactor(0, 2)
+        self.preview_splitter.setStretchFactor(1, 1)
+
+        preview_widget = QWidget()
+        preview_layout = QVBoxLayout(preview_widget)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.addWidget(self.preview_splitter)
 
         self.splitter.addWidget(preview_widget)
         self.splitter.setStretchFactor(0, 2)
@@ -613,24 +815,49 @@ class SessionFilesDialog(QDialog):
 
         self._load_files()
         self._restore_state()
+        if not self._preview_splitter_restored:
+            QTimer.singleShot(0, self._set_default_preview_splitter_sizes)
 
     def _restore_state(self):
-        geometry = self.settings.value("sessionfiles/geometry")
+        geometry = self.settings.value(f"{self._settings_prefix}/geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
-        header_state = self.settings.value("sessionfiles/header")
+        header_state = self.settings.value(f"{self._settings_prefix}/header")
         if header_state is not None:
             self.files_table.horizontalHeader().restoreState(header_state)
+            if not self._show_quality_tools:
+                # Per sicurezza, indipendentemente da cosa c'era salvato:
+                # queste colonne non vanno mai mostrate in modalità
+                # calibrazione (vedi __init__).
+                for col in (SF_STARS, SF_FWHM, SF_NOISE):
+                    self.files_table.setColumnHidden(col, True)
         else:
             self.files_table.resizeColumnsToContents()
-        splitter_state = self.settings.value("sessionfiles/splitter")
+        splitter_state = self.settings.value(f"{self._settings_prefix}/splitter")
         if splitter_state is not None:
             self.splitter.restoreState(splitter_state)
 
+        preview_splitter_state = self.settings.value(f"{self._settings_prefix}/preview_splitter")
+        if preview_splitter_state is not None:
+            self.preview_splitter.restoreState(preview_splitter_state)
+            self._preview_splitter_restored = True
+        else:
+            self._preview_splitter_restored = False
+
+    def _set_default_preview_splitter_sizes(self):
+        """Proporzioni di default (foto ~60%, header FITS ~40%) al primo
+        avvio, quando non c'è ancora uno stato salvato: resta comunque
+        ridimensionabile trascinando la barra divisoria."""
+        total = self.preview_splitter.height()
+        if total > 0:
+            photo_h = max(120, int(total * 0.6))
+            self.preview_splitter.setSizes([photo_h, max(80, total - photo_h)])
+
     def closeEvent(self, event):
-        self.settings.setValue("sessionfiles/geometry", self.saveGeometry())
-        self.settings.setValue("sessionfiles/header", self.files_table.horizontalHeader().saveState())
-        self.settings.setValue("sessionfiles/splitter", self.splitter.saveState())
+        self.settings.setValue(f"{self._settings_prefix}/geometry", self.saveGeometry())
+        self.settings.setValue(f"{self._settings_prefix}/header", self.files_table.horizontalHeader().saveState())
+        self.settings.setValue(f"{self._settings_prefix}/splitter", self.splitter.saveState())
+        self.settings.setValue(f"{self._settings_prefix}/preview_splitter", self.preview_splitter.saveState())
         super().closeEvent(event)
 
     def _load_files(self):
@@ -716,11 +943,10 @@ class SessionFilesDialog(QDialog):
             self.preview_label.setText(tr("Nessuna anteprima disponibile per questo tipo di file"))
 
     def _show_pixmap(self, pixmap):
-        scaled = pixmap.scaled(
-            self.preview_label.width() or 500, self.preview_label.height() or 400,
-            Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        )
-        self.preview_label.setPixmap(scaled)
+        # self.preview_label è una ScaledPixmapLabel: le basta l'immagine alla
+        # sua risoluzione originale, si scala (e ri-scala da sola a ogni
+        # ridimensionamento del riquadro) per conto suo.
+        self.preview_label.setPixmap(pixmap)
         self.preview_label.setText("")
 
     def open_zoom_dialog(self):
@@ -1161,9 +1387,10 @@ class CalibrationDialog(QDialog):
     """Finestra separata con l'elenco dei frame di calibrazione (Bias/Dark/Flat
     da cali_frame, e le sessioni dark manuali da DWARF_DARK)."""
 
-    def __init__(self, db, parent=None):
+    def __init__(self, db, thumb_dir, parent=None):
         super().__init__(parent)
         self.db = db
+        self.thumb_dir = thumb_dir
         self.settings = make_settings()
         self.setWindowTitle(tr("Frame di calibrazione (Bias / Dark / Flat)"))
         self.resize(1400, 560)
@@ -1228,6 +1455,17 @@ class CalibrationDialog(QDialog):
         self.open_folder_btn.setEnabled(False)
         self.open_folder_btn.clicked.connect(self.open_selected_folder)
         btn_row.addWidget(self.open_folder_btn)
+        # Visualizzatore FITS/header per i singoli file del frame selezionato,
+        # per coerenza con le altre finestre (riusa la stessa finestra "Apri
+        # sessione": funziona anche per una cartella di calibrazione, non solo
+        # per una sessione vera e propria, richiesto da Nuccio).
+        self.view_files_btn = QPushButton(tr("Visualizza file…"))
+        self.view_files_btn.setEnabled(False)
+        self.view_files_btn.setToolTip(tr(
+            "Apre i file del frame selezionato in una finestra con anteprima immagine/FITS "
+            "e header, come per le sessioni normali."))
+        self.view_files_btn.clicked.connect(self.view_selected_files)
+        btn_row.addWidget(self.view_files_btn)
         close_btn = QPushButton(tr("Chiudi"))
         close_btn.clicked.connect(self.close)
         btn_row.addWidget(close_btn)
@@ -1252,24 +1490,60 @@ class CalibrationDialog(QDialog):
         super().closeEvent(event)
 
     def _update_open_btn_state(self):
-        self.open_folder_btn.setEnabled(bool(self.table.selectedItems()))
+        has_selection = bool(self.table.selectedItems())
+        self.open_folder_btn.setEnabled(has_selection)
+        self.view_files_btn.setEnabled(has_selection)
 
-    def open_selected_folder(self):
+    def _selected_record_folder(self):
+        """Ritorna la cartella del frame selezionato (per cali_frame il
+        percorso salvato è il file FITS master: la cartella è quella che lo
+        contiene; per dwarf_dark il percorso è già la cartella della sessione
+        dark), o None se non c'è selezione."""
         items = self.table.selectedItems()
         if not items:
-            return
+            return None
         record_path = self.table.item(items[0].row(), CAL_PATH).text()
         if not record_path:
-            return
-        # per cali_frame il percorso è il file FITS: la "cartella sessione" è
-        # la sua cartella contenitrice (cam_0/cam_1); per dwarf_dark il
-        # percorso è già la cartella della sessione dark
-        folder = record_path if os.path.isdir(record_path) else os.path.dirname(record_path)
+            return None
+        return record_path if os.path.isdir(record_path) else os.path.dirname(record_path)
+
+    def open_selected_folder(self):
+        folder = self._selected_record_folder()
         if folder and os.path.isdir(folder):
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
         else:
             QMessageBox.warning(self, tr("Cartella non trovata"),
                                  tr("La cartella non è più presente sul disco:\n{folder}").format(folder=folder))
+
+    def view_selected_files(self):
+        items = self.table.selectedItems()
+        if not items:
+            return
+        folder = self._selected_record_folder()
+        if not folder or not os.path.isdir(folder):
+            QMessageBox.warning(self, tr("Cartella non trovata"),
+                                 tr("La cartella non è più presente sul disco:\n{folder}").format(folder=folder))
+            return
+        row_idx = items[0].row()
+        telescope = self.table.item(row_idx, CAL_TELESCOPE).text()
+        ftype = self.table.item(row_idx, CAL_TYPE).text()
+        camera = self.table.item(row_idx, CAL_CAMERA).text()
+        label = f"{telescope} · {ftype} · {camera}"
+        # Riusa la stessa finestra "Apri sessione" (lista file + anteprima
+        # FITS/immagine + header): funziona perfettamente anche per una
+        # cartella di calibrazione, non solo per una sessione vera e propria,
+        # perché lavora solo sui file su disco (refresh_session_record fa
+        # da sé nulla se la cartella non è una sessione nota). Con
+        # show_quality_tools=False restano nascosti i controlli e le colonne
+        # di analisi qualità (stelle/FWHM/rumore), che per un frame di
+        # calibrazione non hanno senso; settings_prefix diverso per non
+        # mescolare geometria/colonne salvate con quelle della finestra "Apri
+        # sessione" normale (richiesto da Nuccio).
+        dlg = SessionFilesDialog(
+            folder, label, self.db, self.thumb_dir, self, on_change=self.reload,
+            show_quality_tools=False, settings_prefix="calibrationfiles",
+            window_title=tr("Frame di calibrazione: {label}").format(label=label))
+        dlg.exec()
 
     def reload(self):
         telescope = self.telescope_combo.currentText()
@@ -1609,7 +1883,19 @@ class MainWindow(QMainWindow):
         set_language(self.settings.value("language", "it", type=str))
 
         self.setWindowTitle(tr("Catalogo Sessioni Astronomiche DWARF"))
-        self.resize(1250, 780)
+        # Dimensione iniziale proporzionale allo schermo disponibile (invece di
+        # un valore fisso pensato per un solo monitor), così al primissimo
+        # avvio - prima che ci sia una geometria salvata da ripristinare - la
+        # finestra si apre già a una dimensione comoda su qualunque risoluzione,
+        # Full HD compreso. Un minimo assoluto comunque utilizzabile anche su
+        # schermi piccoli.
+        self.setMinimumSize(900, 600)
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            self.resize(max(900, int(avail.width() * 0.85)), max(600, int(avail.height() * 0.85)))
+        else:
+            self.resize(1250, 780)
 
         self.db_path = db_path
         self.thumb_dir = thumb_dir
@@ -1625,7 +1911,8 @@ class MainWindow(QMainWindow):
 
         if not self._sessions_header_restored:
             self.sessions_table.resizeColumnsToContents()
-        if not self._splitter_restored or not self._left_splitter_restored:
+        if (not self._splitter_restored or not self._left_splitter_restored
+                or not self._detail_splitter_restored):
             QTimer.singleShot(0, self._set_default_splitter_sizes)
 
     # ------------------------------------------------------------------
@@ -1718,14 +2005,14 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(filter_row)
 
         # --- Splitter centrale ---
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter = ProportionalSplitter(Qt.Orientation.Horizontal)
 
         # Pannello sinistro: tabella sessioni sopra e log sotto, in uno
         # splitter verticale dedicato (ridimensionabile, con barra di
         # scorrimento propria del log) - non più a tutta larghezza sotto
         # entrambi i pannelli, per lasciare tutta l'altezza della finestra
         # al pannello foto/dettagli a destra (richiesto da Nuccio).
-        self.left_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.left_splitter = ProportionalSplitter(Qt.Orientation.Vertical)
 
         sessions_widget = QWidget()
         sessions_layout = QVBoxLayout(sessions_widget)
@@ -1769,14 +2056,23 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.left_splitter)
 
         # --- Pannello dettaglio / anteprima ---
-        detail_widget = QWidget()
-        detail_layout = QVBoxLayout(detail_widget)
+        # Diviso in tre sezioni ridimensionabili con uno splitter verticale
+        # (foto sopra, informazioni al centro, pulsanti sotto): così ognuno può
+        # adattare lo spazio dedicato a ciascuna parte allo schermo e alla
+        # risoluzione che ha, invece di avere altezze fisse pensate per un solo
+        # monitor (segnalato da un utente su schermo Full HD 1920x1080, dove i
+        # pulsanti finivano fuori dalla finestra e foto/informazioni si
+        # sovrapponevano).
+        self.detail_splitter = ProportionalSplitter(Qt.Orientation.Vertical)
 
-        self.preview_label = QLabel(tr("Nessuna sessione selezionata"))
+        self.preview_label = ScaledPixmapLabel(tr("Nessuna sessione selezionata"))
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumHeight(360)
+        # Altezza minima ridotta (prima 360px fissi): resta solo una base di
+        # partenza ragionevole, lo spazio reale lo decide l'utente trascinando
+        # la barra dello splitter.
+        self.preview_label.setMinimumHeight(120)
         self.preview_label.setFrameShape(QFrame.Shape.StyledPanel)
-        detail_layout.addWidget(self.preview_label, 1)
+        self.detail_splitter.addWidget(self.preview_label)
 
         info_frame = QFrame()
         info_grid = QGridLayout(info_frame)
@@ -1825,42 +2121,53 @@ class MainWindow(QMainWindow):
 
         info_grid.setColumnStretch(1, 1)
         info_grid.setColumnStretch(3, 1)
-        detail_layout.addWidget(info_frame)
 
-        btn_row = QHBoxLayout()
+        # Il pannello informazioni va in una propria area con barra di
+        # scorrimento: se un valore molto lungo (percorso cartella,
+        # identificazione SIMBAD...) dovesse richiedere molte righe andate a
+        # capo, scorre invece di "rubare" spazio a foto e pulsanti.
+        info_scroll = QScrollArea()
+        info_scroll.setWidgetResizable(True)
+        info_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        info_scroll.setWidget(info_frame)
+        self.detail_splitter.addWidget(info_scroll)
+
+        # --- Pulsanti azione sessione ---
+        # Un unico FlowLayout (invece di 3 righe fisse QHBoxLayout): i pulsanti
+        # vanno a capo da soli quando lo spazio orizzontale non basta, così
+        # non finiscono mai tagliati fuori dalla finestra su schermi stretti o
+        # a bassa risoluzione.
+        buttons_widget = QWidget()
+        buttons_flow = FlowLayout(buttons_widget, margin=4, h_spacing=6, v_spacing=6)
+
         self.open_stack_btn = QPushButton(tr("Apri immagine stack"))
         self.open_stack_btn.setEnabled(False)
         self.open_stack_btn.setToolTip(tr(
             "Apre l'immagine stack principale della sessione (stacked.jpg o, su alcuni "
             "telescopi, altro formato) con l'app associata di Windows."))
         self.open_stack_btn.clicked.connect(self.open_stacked_jpg)
-        btn_row.addWidget(self.open_stack_btn)
+        buttons_flow.addWidget(self.open_stack_btn)
         self.open_annotated_btn = QPushButton(tr("Apri etichettata"))
         self.open_annotated_btn.setEnabled(False)
         self.open_annotated_btn.setToolTip(tr(
             "Apre l'immagine con le etichette astrometria nell'app Foto di Windows, per "
             "esaminarla con zoom e rotazione meglio che nell'anteprima del catalogo."))
         self.open_annotated_btn.clicked.connect(self.open_annotated_image)
-        btn_row.addWidget(self.open_annotated_btn)
+        buttons_flow.addWidget(self.open_annotated_btn)
         self.open_folder_btn = QPushButton(tr("Apri cartella sessione in Esplora risorse"))
         self.open_folder_btn.setEnabled(False)
         self.open_folder_btn.clicked.connect(self.open_session_folder)
-        btn_row.addWidget(self.open_folder_btn)
+        buttons_flow.addWidget(self.open_folder_btn)
         self.open_session_btn = QPushButton(tr("Apri sessione"))
         self.open_session_btn.setEnabled(False)
         self.open_session_btn.clicked.connect(self.open_session_files_dialog)
-        btn_row.addWidget(self.open_session_btn)
-        detail_layout.addLayout(btn_row)
+        buttons_flow.addWidget(self.open_session_btn)
 
-        btn_row2 = QHBoxLayout()
         self.identify_btn = QPushButton(tr("Identifica oggetto (SIMBAD)"))
         self.identify_btn.setEnabled(False)
         self.identify_btn.clicked.connect(self.identify_object)
-        btn_row2.addWidget(self.identify_btn)
-        btn_row2.addStretch(1)
-        detail_layout.addLayout(btn_row2)
+        buttons_flow.addWidget(self.identify_btn)
 
-        btn_row3 = QHBoxLayout()
         self.astrometry_btn = QPushButton(tr("Astrometria (etichetta oggetti)"))
         self.astrometry_btn.setEnabled(False)
         self.astrometry_btn.setToolTip(tr(
@@ -1869,27 +2176,39 @@ class MainWindow(QMainWindow):
             "siril-cli.exe e il catalogo Gaia locale) oppure Astrometry.net (locale, dentro "
             "WSL)."))
         self.astrometry_btn.clicked.connect(self.run_astrometry)
-        btn_row3.addWidget(self.astrometry_btn)
+        buttons_flow.addWidget(self.astrometry_btn)
         self.print_btn = QPushButton(tr("Stampa"))
         self.print_btn.setEnabled(False)
         self.print_btn.clicked.connect(self.print_preview)
-        btn_row3.addWidget(self.print_btn)
+        buttons_flow.addWidget(self.print_btn)
         self.save_annotated_btn = QPushButton(tr("Salva"))
         self.save_annotated_btn.setEnabled(False)
         self.save_annotated_btn.setToolTip(tr(
             "Salva l'immagine con le etichette astrometria come nuovo file nella cartella "
             "sessione (l'originale non viene toccato)."))
         self.save_annotated_btn.clicked.connect(self.save_annotated)
-        btn_row3.addWidget(self.save_annotated_btn)
+        buttons_flow.addWidget(self.save_annotated_btn)
         self.toggle_original_btn = QPushButton(tr("Vedi originale"))
         self.toggle_original_btn.setEnabled(False)
         self.toggle_original_btn.setToolTip(tr(
             "Passa dall'immagine etichettata allo stack originale (e viceversa) "
             "senza rifare l'astrometria."))
         self.toggle_original_btn.clicked.connect(self.toggle_preview_original)
-        btn_row3.addWidget(self.toggle_original_btn)
-        btn_row3.addStretch(1)
-        detail_layout.addLayout(btn_row3)
+        buttons_flow.addWidget(self.toggle_original_btn)
+
+        # Il widget dei pulsanti va aggiunto DIRETTAMENTE nello splitter (non
+        # dentro una QScrollArea): lo splitter assegna al pannello la sua
+        # larghezza reale esatta, e solo così il FlowLayout calcola
+        # correttamente dove andare a capo. Con una QScrollArea di mezzo il
+        # widget riceve invece la propria larghezza "preferita" (quella di
+        # tutti i pulsanti in fila) e i pulsanti finirebbero comunque fuori
+        # dalla vista. Se la sezione viene ridotta molto in altezza con la
+        # barra dello splitter, alcuni pulsanti possono restare nascosti sotto
+        # al bordo: in tal caso basta trascinare la barra per dare più spazio
+        # a questa sezione (a scapito di foto o informazioni).
+        buttons_widget.setMinimumHeight(60)
+        buttons_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.detail_splitter.addWidget(buttons_widget)
 
         self._annotated_temp_path = None
         self._annotated_session_id = None
@@ -1902,7 +2221,7 @@ class MainWindow(QMainWindow):
         self._show_original = False
         self._astrometry_session_id = None
 
-        self.main_splitter.addWidget(detail_widget)
+        self.main_splitter.addWidget(self.detail_splitter)
         self.main_splitter.setStretchFactor(0, 2)
         self.main_splitter.setStretchFactor(1, 3)
         main_layout.addWidget(self.main_splitter, 1)
@@ -1959,7 +2278,7 @@ class MainWindow(QMainWindow):
     def open_about_dialog(self):
         QMessageBox.about(
             self, tr("Informazioni su Catalogo Sessioni Astronomiche DWARF"),
-            f"<b>{tr('Catalogo Sessioni Astronomiche DWARF v. 1.0')}</b><br><br>"
+            f"<b>{tr('Catalogo Sessioni Astronomiche DWARF v. 1.1')}</b><br><br>"
             + tr("Creata da Nuccio Mandarà con l'aiuto fondamentale di Claude AI."))
 
     def _load_settings(self):
@@ -1970,6 +2289,12 @@ class MainWindow(QMainWindow):
         geometry = self.settings.value("mainwindow/geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
+            # Una geometria salvata su un monitor (o con una configurazione di
+            # monitor multipli) diversa da quella attuale può risultare troppo
+            # grande o posizionata parzialmente/interamente fuori dallo
+            # schermo visibile: qui la si corregge per farla rientrare sempre
+            # nello schermo disponibile, qualunque sia la risoluzione.
+            self._clamp_geometry_to_screen()
             self._geometry_restored = True
         else:
             self._geometry_restored = False
@@ -1995,6 +2320,43 @@ class MainWindow(QMainWindow):
         else:
             self._left_splitter_restored = False
 
+        detail_splitter_state = self.settings.value("mainwindow/detail_splitter")
+        if detail_splitter_state is not None:
+            self.detail_splitter.restoreState(detail_splitter_state)
+            self._detail_splitter_restored = True
+        else:
+            self._detail_splitter_restored = False
+
+    def _clamp_geometry_to_screen(self):
+        """Se la finestra ripristinata (self.geometry(), posizione+dimensioni)
+        non sta interamente dentro lo schermo attualmente disponibile (bordi
+        utili, esclusa la barra delle applicazioni di Windows), la riduce e/o
+        riposiziona per farcela rientrare. Risolve il caso di impostazioni
+        salvate su un monitor diverso (più grande, o con disposizione
+        multi-monitor diversa) da quello in uso ora."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        geo = self.geometry()
+
+        width = min(geo.width(), avail.width())
+        height = min(geo.height(), avail.height())
+
+        x = geo.x()
+        y = geo.y()
+        if x < avail.x():
+            x = avail.x()
+        if y < avail.y():
+            y = avail.y()
+        if x + width > avail.x() + avail.width():
+            x = avail.x() + avail.width() - width
+        if y + height > avail.y() + avail.height():
+            y = avail.y() + avail.height() - height
+
+        if (width, height) != (geo.width(), geo.height()) or (x, y) != (geo.x(), geo.y()):
+            self.setGeometry(x, y, width, height)
+
     def _set_default_splitter_sizes(self):
         """Proporzioni di default degli splitter al primo avvio (nessuno stato
         salvato): nello splitter centrale la tabella prende solo lo spazio
@@ -2014,6 +2376,16 @@ class MainWindow(QMainWindow):
             left_total = self.left_splitter.height()
             if left_total > 0:
                 self.left_splitter.setSizes([max(200, int(left_total * 0.8)), max(100, int(left_total * 0.2))])
+
+        if not self._detail_splitter_restored:
+            detail_total = self.detail_splitter.height()
+            if detail_total > 0:
+                # Foto ~50%, informazioni ~35%, pulsanti ~15% - restano comunque
+                # tutte e tre ridimensionabili trascinando le barre divisorie.
+                photo_h = max(150, int(detail_total * 0.50))
+                info_h = max(120, int(detail_total * 0.35))
+                buttons_h = max(70, detail_total - photo_h - info_h)
+                self.detail_splitter.setSizes([photo_h, info_h, buttons_h])
 
     # ------------------------------------------------------------------
     def browse_root(self):
@@ -2265,11 +2637,10 @@ class MainWindow(QMainWindow):
         if show_path:
             pixmap = QPixmap(show_path)
             if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    self.preview_label.width() or 500, self.preview_label.height() or 400,
-                    Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                )
-                self.preview_label.setPixmap(scaled)
+                # self.preview_label è una ScaledPixmapLabel: le basta
+                # l'immagine alla risoluzione originale, si scala (e ri-scala
+                # da sola a ogni ridimensionamento del riquadro) per conto suo.
+                self.preview_label.setPixmap(pixmap)
             else:
                 self.preview_label.setText(tr("Impossibile visualizzare l'immagine"))
                 self.preview_label.setPixmap(QPixmap())
@@ -2831,7 +3202,7 @@ class MainWindow(QMainWindow):
         ))
 
     def open_calibration_dialog(self):
-        dlg = CalibrationDialog(self.db, self)
+        dlg = CalibrationDialog(self.db, self.thumb_dir, self)
         dlg.exec()
 
     def closeEvent(self, event):
@@ -2842,6 +3213,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("mainwindow/sessions_header", self.sessions_table.horizontalHeader().saveState())
         self.settings.setValue("mainwindow/splitter", self.main_splitter.saveState())
         self.settings.setValue("mainwindow/left_splitter", self.left_splitter.saveState())
+        self.settings.setValue("mainwindow/detail_splitter", self.detail_splitter.saveState())
         self.db.close()
         event.accept()
 
